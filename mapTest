@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapping and Displaying Data with Windy API</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        #map {
+            height: 600px;
+            width: 100%;
+        }
+        .purpleair-label {
+            font-size: 12px; /* Smaller font size for PurpleAir */
+        }
+        .nowrap {
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://api.windy.com/assets/map-forecast/libBoot.js"></script>
+    <script>
+        // Initialize the map
+        const map = L.map('map').setView([53.535645, -113.47194], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Track existing markers
+        let existingMarkers = [];
+
+        // Function to adjust PM2.5 values based on humidity
+        function adjustPm25(pm25, humidity) {
+            let adjustedPm25 = pm25;
+            if (humidity < 30) {
+                adjustedPm25 = pm25 / (1 + 0.24 / (100 / 30 - 1));
+            } else if (humidity > 70) {
+                adjustedPm25 = pm25 / (1 + 0.24 / (100 / 70 - 1));
+            } else {
+                adjustedPm25 = pm25 / (1 + 0.24 / (100 / humidity - 1));
+            }
+            return adjustedPm25;
+        }
+
+        // Add PurpleAir sensor to the map
+        function addPurpleAirSensor(lat, lng, pm25, name, date) {
+            const color = pm25 <= 30 ? 'blue' : pm25 <= 60 ? 'orange' : pm25 <= 100 ? 'red' : 'brown';
+            const circle = L.circle([lat, lng], {
+                color: color,
+                fillColor: color,
+                fillOpacity: 0.2,
+                radius: 250
+            }).addTo(map)
+            .bindPopup(`<b>Site:</b> ${name}<br><b>PM2.5 (past 1hr):</b> <span class="nowrap">${pm25}&nbsp;µg/m³</span><br><b>Date:</b> ${date}`);
+
+            const icon = L.divIcon({
+                className: 'aqhi-label purpleair-label',
+                html: `<span class="nowrap">${pm25}&nbsp;µg/m³</span>`,
+                iconSize: [35, 35],
+                iconAnchor: [15, 15]
+            });
+
+            const marker = L.marker([lat, lng], {icon: icon}).addTo(map);
+
+            // Track the marker
+            existingMarkers.push(marker);
+
+            return marker;
+        }
+
+        // Function to get the distance between two coordinates
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // Earth radius in meters
+            const φ1 = lat1 * Math.PI/180; // φ, λ in radians
+            const φ2 = lat2 * Math.PI/180;
+            const Δφ = (lat2-lat1) * Math.PI/180;
+            const Δλ = (lon2-lon1) * Math.PI/180;
+
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+            const d = R * c; // in meters
+            return d;
+        }
+
+        // Fetch and process PurpleAir data
+        async function fetchPurpleAirData(lat, lng) {
+            const API_KEY = 'ED3E067C-0904-11ED-8561-42010A800005';
+            const radius = 5000; // 5 km radius
+            const purpleAirUrl = `https://api.purpleair.com/v1/sensors?location_type=0&radius=${radius}&fields=last_seen,latitude,longitude,humidity,pm2.5_60minute,pm2.5_10minute&lat=${lat}&lon=${lng}`;
+
+            try {
+                const response = await fetch(purpleAirUrl, {
+                    headers: {
+                        'X-API-Key': API_KEY
+                    }
+                });
+                const data = await response.json();
+
+                let closestSensor = null;
+                let minDistance = Infinity;
+
+                data.data.forEach(sensorData => {
+                    const [sensorId, last_seen, latitude, longitude, humidity, pm2_5_60minute, pm2_5_10minute] = sensorData;
+                    const distance = getDistance(lat, lng, latitude, longitude);
+
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestSensor = { sensorId, last_seen, latitude, longitude, humidity, pm2_5_60minute, pm2_5_10minute };
+                    }
+                });
+
+                if (closestSensor) {
+                    const { sensorId, last_seen, latitude, longitude, humidity, pm2_5_60minute } = closestSensor;
+                    const adjustedPm25_60minute = adjustPm25(pm2_5_60minute, humidity);
+
+                    // Adjust the timestamp to the local timezone
+                    const adjustedTimestamp = new Date(last_seen * 1000);
+
+                    addPurpleAirSensor(latitude, longitude, adjustedPm25_60minute.toFixed(1), `Sensor ${sensorId}`, adjustedTimestamp.toLocaleString());
+                } else {
+                    console.error('No sensors found within the specified radius.');
+                }
+            } catch (error) {
+                console.error('Error fetching PurpleAir data:', error);
+            }
+        }
+
+        // Add click event listener to the map
+        map.on('click', function(e) {
+            const { lat, lng } = e.latlng;
+
+            // Check if click is near an existing marker
+            let isNearExistingMarker = false;
+            existingMarkers.forEach(marker => {
+                const markerLatLng = marker.getLatLng();
+                if (getDistance(lat, lng, markerLatLng.lat, markerLatLng.lng) < 50) { // 50 meters threshold
+                    isNearExistingMarker = true;
+                }
+            });
+
+            if (!isNearExistingMarker) {
+                fetchPurpleAirData(lat, lng);
+            }
+        });
+
+        window.addEventListener('message', (event) => {
+            if (event.data === 'ready') {
+                // Initial data fetch for the map center
+                fetchPurpleAirData(map.getCenter().lat, map.getCenter().lng);
+            }
+        });
+
+        window.onload = () => {
+            window.parent.postMessage('ready', '*');
+        };
+
+        // Integrate Windy API
+        windyInit({
+            key: <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapping and Displaying Data with Windy API</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        #map {
+            height: 600px;
+            width: 100%;
+        }
+        .purpleair-label {
+            font-size: 12px; /* Smaller font size for PurpleAir */
+        }
+        .nowrap {
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://api.windy.com/assets/map-forecast/libBoot.js"></script>
+    <script>
+        // Initialize the map
+        const map = L.map('map').setView([53.535645, -113.47194], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Track existing markers
+        let existingMarkers = [];
+
+        // Function to adjust PM2.5 values based on humidity
+        function adjustPm25(pm25, humidity) {
+            let adjustedPm25 = pm25;
+            if (humidity < 30) {
+                adjustedPm25 = pm25 / (1 + 0.24 / (100 / 30 - 1));
+            } else if (humidity > 70) {
+                adjustedPm25 = pm25 / (1 + 0.24 / (100 / 70 - 1));
+            } else {
+                adjustedPm25 = pm25 / (1 + 0.24 / (100 / humidity - 1));
+            }
+            return adjustedPm25;
+        }
+
+        // Add PurpleAir sensor to the map
+        function addPurpleAirSensor(lat, lng, pm25, name, date) {
+            const color = pm25 <= 30 ? 'blue' : pm25 <= 60 ? 'orange' : pm25 <= 100 ? 'red' : 'brown';
+            const circle = L.circle([lat, lng], {
+                color: color,
+                fillColor: color,
+                fillOpacity: 0.2,
+                radius: 250
+            }).addTo(map)
+            .bindPopup(`<b>Site:</b> ${name}<br><b>PM2.5 (past 1hr):</b> <span class="nowrap">${pm25}&nbsp;µg/m³</span><br><b>Date:</b> ${date}`);
+
+            const icon = L.divIcon({
+                className: 'aqhi-label purpleair-label',
+                html: `<span class="nowrap">${pm25}&nbsp;µg/m³</span>`,
+                iconSize: [35, 35],
+                iconAnchor: [15, 15]
+            });
+
+            const marker = L.marker([lat, lng], {icon: icon}).addTo(map);
+
+            // Track the marker
+            existingMarkers.push(marker);
+
+            return marker;
+        }
+
+        // Function to get the distance between two coordinates
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // Earth radius in meters
+            const φ1 = lat1 * Math.PI/180; // φ, λ in radians
+            const φ2 = lat2 * Math.PI/180;
+            const Δφ = (lat2-lat1) * Math.PI/180;
+            const Δλ = (lon2-lon1) * Math.PI/180;
+
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+            const d = R * c; // in meters
+            return d;
+        }
+
+        // Fetch and process PurpleAir data
+        async function fetchPurpleAirData(lat, lng) {
+            const API_KEY = 'ED3E067C-0904-11ED-8561-42010A800005';
+            const radius = 5000; // 5 km radius
+            const purpleAirUrl = `https://api.purpleair.com/v1/sensors?location_type=0&radius=${radius}&fields=last_seen,latitude,longitude,humidity,pm2.5_60minute,pm2.5_10minute&lat=${lat}&lon=${lng}`;
+
+            try {
+                const response = await fetch(purpleAirUrl, {
+                    headers: {
+                        'X-API-Key': API_KEY
+                    }
+                });
+                const data = await response.json();
+
+                let closestSensor = null;
+                let minDistance = Infinity;
+
+                data.data.forEach(sensorData => {
+                    const [sensorId, last_seen, latitude, longitude, humidity, pm2_5_60minute, pm2_5_10minute] = sensorData;
+                    const distance = getDistance(lat, lng, latitude, longitude);
+
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestSensor = { sensorId, last_seen, latitude, longitude, humidity, pm2_5_60minute, pm2_5_10minute };
+                    }
+                });
+
+                if (closestSensor) {
+                    const { sensorId, last_seen, latitude, longitude, humidity, pm2_5_60minute } = closestSensor;
+                    const adjustedPm25_60minute = adjustPm25(pm2_5_60minute, humidity);
+
+                    // Adjust the timestamp to the local timezone
+                    const adjustedTimestamp = new Date(last_seen * 1000);
+
+                    addPurpleAirSensor(latitude, longitude, adjustedPm25_60minute.toFixed(1), `Sensor ${sensorId}`, adjustedTimestamp.toLocaleString());
+                } else {
+                    console.error('No sensors found within the specified radius.');
+                }
+            } catch (error) {
+                console.error('Error fetching PurpleAir data:', error);
+            }
+        }
+
+        // Add click event listener to the map
+        map.on('click', function(e) {
+            const { lat, lng } = e.latlng;
+
+            // Check if click is near an existing marker
+            let isNearExistingMarker = false;
+            existingMarkers.forEach(marker => {
+                const markerLatLng = marker.getLatLng();
+                if (getDistance(lat, lng, markerLatLng.lat, markerLatLng.lng) < 50) { // 50 meters threshold
+                    isNearExistingMarker = true;
+                }
+            });
+
+            if (!isNearExistingMarker) {
+                fetchPurpleAirData(lat, lng);
+            }
+        });
+
+        window.addEventListener('message', (event) => {
+            if (event.data === 'ready') {
+                // Initial data fetch for the map center
+                fetchPurpleAirData(map.getCenter().lat, map.getCenter().lng);
+            }
+        });
+
+        window.onload = () => {
+            window.parent.postMessage('ready', '*');
+        };
+
+        // Integrate Windy API
+        windyInit({
+            key: 'yVY0cXn4PmZ0G3BjUvQ7IpSqOG48bgiL',
+            lat: 53.535645,
+            lon: -113.47194,
+            zoom: 5,
+        }, windyAPI => {
+            const { map } = windyAPI;
+            L.popup()
+                .setLatLng([53.535645, -113.47194])
+                .setContent('Windy map integrated!')
+                .openOn(map);
+        });
+    </script>
+</body>
+</html>
+
+            lat: 53.535645,
+            lon: -113.47194,
+            zoom: 5,
+        }, windyAPI => {
+            const { map } = windyAPI;
+            L.popup()
+                .setLatLng([53.535645, -113.47194])
+                .setContent('Windy map integrated!')
+                .openOn(map);
+        });
+    </script>
+</body>
+</html>
