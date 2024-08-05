@@ -11,6 +11,10 @@
             height: 600px;
             width: 100%;
         }
+        #windy {
+        height: 600px;
+        width: 100%;
+        }
     </style>
 </head>
 <body>
@@ -18,31 +22,6 @@
     <div id="windy"></div>
 
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
-    <script src="https://api.windy.com/assets/map-forecast/libBoot.js"></script>
-    <script>
-        // Initialize the Leaflet map
-        const map = L.map('map').setView([53.535645, -113.47194], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }).addTo(map);
-
-        window.onload = () => {
-            window.parent.postMessage('ready', '*');
-        };
-
-        // Integrate Windy API
-        windyInit({
-            key: 'yVY0cXn4PmZ0G3BjUvQ7IpSqOG48bgiL', 
-            lat: 53.535645,
-            lon: -113.47194,
-            zoom: 5,
-        }, windyAPI => {
-            const { map } = windyAPI;
-            L.popup()
-                .setLatLng([53.535645, -113.47194])
-                .setContent('Windy map integrated!')
-                .openOn(map);
-        });
-    </script>
+    <script src="script.js"></script>
 </body>
 </html>
