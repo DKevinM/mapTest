@@ -2,34 +2,30 @@ const options = {
     key: 'yVY0cXn4PmZ0G3BjUvQ7IpSqOG48bgiL',
     // Changing Windy parameters at start-up time
     // (recommended for faster start-up)
-    lat: 50.4,
-    lon: 14.3,
+    lat: 53.535645,
+    lon: -113.47194,
     zoom: 5,
-
-    timestamp: Date.now() + 3 * 24 * 60 * 60 * 1000,
-
     hourFormat: '12h',
-
-    // ...etc
 };
 
 windyInit(options, windyAPI => {
-    const { store } = windyAPI;
-    // All the params are stored in windyAPI.store
+    const { map } = windyAPI;
+    L.popup()
+        .setLatLng([53.535645, -113.47194])
+        .setContent('Windy map integrated!')
+        .openOn(map);
 
+    const { store } = windyAPI;
+    
     const levels = store.getAllowed('availLevels');
-    // levels = ['surface', '850h', ... ]
-    // Getting all available values for given key
 
     let i = 0;
     setInterval(() => {
         i = i === levels.length - 1 ? 0 : i + 1;
 
-        // Changing Windy params at runtime
         store.set('level', levels[i]);
-    }, 500);
+    }, 5000);
 
-    // Observing change of .store value
     store.on('level', level => {
         console.log(`Level was changed: ${level}`);
     });
