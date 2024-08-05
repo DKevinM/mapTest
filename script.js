@@ -1,5 +1,5 @@
 const options = {
-    key: 'PsLAtXpsPTZexBwUkO7Mx5I',
+    key: 'yVY0cXn4PmZ0G3BjUvQ7IpSqOG48bgiL',
     // Changing Windy parameters at start-up time
     // (recommended for faster start-up)
     lat: 50.4,
