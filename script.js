@@ -9,7 +9,7 @@ windyInit(options, windyAPI => {
     const { map } = windyAPI;
     L.popup()
         .setLatLng([53.535645, -113.47194])
-        .setContent('Windy map integrated!')
+        .setContent('Windy map')
         .openOn(map);
 
 });
